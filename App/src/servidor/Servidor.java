@@ -197,7 +197,7 @@ public class Servidor extends Thread {
             sOutput.println(byte2str(cifrar(llaveSimetricaKey, datosCliente.get(idPaquete), PADDING)));
         } else {
             System.out.println("paquete " + idPaquete + " no existe");
-            sOutput.println(byte2str(cifrar(llaveSimetricaKey, "ERROR", PADDING)));
+            sOutput.println(byte2str(cifrar(llaveSimetricaKey, "DESCONOCIDO", PADDING)));
             socketCliente.close();
             return;
         }

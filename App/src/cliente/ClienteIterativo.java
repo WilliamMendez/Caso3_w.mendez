@@ -14,8 +14,8 @@ public class ClienteIterativo extends Cliente {
     public static void main(String[] args) throws Exception {
         try {
             PublicKey llave = getPublicKey("keys", "RSA");
-            // ClienteIterativo cliente = new ClienteIterativo(0, 32, llave);
-            ClienteIterativo cliente = new ClienteIterativo(0, 1, llave);
+            ClienteIterativo cliente = new ClienteIterativo(0, 32, llave);
+            // ClienteIterativo cliente = new ClienteIterativo(0, 1, llave);
             cliente.start();
 
         } catch (NoSuchAlgorithmException | InvalidKeySpecException | IOException e) {
