@@ -138,25 +138,24 @@ public class Cliente extends Thread {
                 inputLine = descifrar(llavePublica, str2byte(sInput.readLine()), "RSA");
 
                 if (inputLine.equals("ACK")) {
-                    System.out.println("recibido:" + inputLine);
+                    System.out.println("Se encontró el cliente: " + id);
                 } else {
-                    System.out.println("ERROR: cliente no existe");
+                    System.out.println("ERROR: cliente " + id + " no existe");
                     socketCliente.close();
                     return;
                 }
 
                 // idPaquete / respuesta de tabla cifrado con llave simetrica
-                System.out.println("peticion " + i + " enviada");
                 sOutput.println(byte2str(cifrar(secretKey, String.valueOf(i), PADDING)));
 
                 inputLine = descifrar(secretKey, str2byte(sInput.readLine()), PADDING);
 
                 if (inputLine.equals("DESCONOCIDO")) {
-                    System.out.println("el paquete no esta");
+                    System.out.println("el paquete " + i + " no esta");
                     socketCliente.close();
                     return;
                 } else {
-                    System.out.println("recibido:" + inputLine);
+                    System.out.println("recibido: " + inputLine);
                 }
 
                 // ACK / HMAC(LS, digest(idCliente, idPaquete, respuesta))
