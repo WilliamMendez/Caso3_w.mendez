@@ -147,9 +147,10 @@ public class Servidor extends Thread {
         // INICIO / ACK
         inputLine = descifrar(privateKey, str2byte(sInput.readLine()), "RSA");
         if (inputLine.equals("INICIO")) {
-            sOutput.println("ACK");
+            System.out.println("INICIO");
+            sOutput.println(byte2str(cifrar(privateKey, "ACK", "RSA")));
         } else {
-            sOutput.println("ERROR");
+            sOutput.println(byte2str(cifrar(privateKey, "ERROR", "RSA")));
             socketCliente.close();
             return;
         }
@@ -159,40 +160,44 @@ public class Servidor extends Thread {
 
         String retoCifrado = byte2str(cifrar(privateKey, retoStr, "RSA"));
         sOutput.println(retoCifrado);
+        System.out.println("reto cifrado...");
 
         // llave simetrica / ACK
-        inputLine = descifrar(privateKey, str2byte(sInput.readLine()), "RSA");
-        byte[] llaveSimetrica = str2byte(descifrar(privateKey, str2byte(inputLine), "RSA"));
+        byte[] simetrica = str2byte(sInput.readLine());
+        inputLine = descifrar(privateKey, simetrica, "RSA");
+
+        byte[] llaveSimetrica = str2byte(inputLine);
         System.out.println("llave simetrica recibida: " + byte2str(llaveSimetrica));
         SecretKey llaveSimetricaKey = new SecretKeySpec(llaveSimetrica, "AES");
 
-        sOutput.println("ACK");
+        sOutput.println(byte2str(cifrar(privateKey, "ACK", "RSA")));
 
         // idCliente / ACK|ERROR
-        inputLine = descifrar(privateKey, str2byte(sInput.readLine()), "RSA");
-        System.out.println("cliente: " + inputLine + " conectado");
+        String idCliente = descifrar(privateKey, str2byte(sInput.readLine()), "RSA");
+        System.out.println("cliente: " + idCliente + " conectado");
 
         HashMap<String, String> datosCliente;
-        if (datos.containsKey(inputLine)) {
+        if (datos.containsKey(idCliente)) {
             System.out.println("cliente existe");
-            sOutput.println("ACK");
-            datosCliente = datos.get(inputLine);
+            sOutput.println(byte2str(cifrar(privateKey, "ACK", "RSA")));
+            datosCliente = datos.get(idCliente);
         } else {
             System.out.println("cliente no existe");
-            sOutput.println("ERROR");
+            sOutput.println(byte2str(cifrar(privateKey, "ERROR", "RSA")));
             socketCliente.close();
             return;
         }
 
         // idPaquete / respuesta de tabla cifrado con llave simetrica
 
-        inputLine = descifrar(llaveSimetricaKey, str2byte(sInput.readLine()), PADDING);
-        if (datosCliente.containsKey(inputLine)) {
-            System.out.println("paquete " + inputLine + " existe" + " con estado: " + datosCliente.get(inputLine));
-            sOutput.println(datosCliente.get(inputLine));
+        String idPaquete = descifrar(llaveSimetricaKey, str2byte(sInput.readLine()), PADDING);
+
+        if (datosCliente.containsKey(idPaquete)) {
+            System.out.println("paquete " + idPaquete + " existe" + " con estado: " + datosCliente.get(idPaquete));
+            sOutput.println(byte2str(cifrar(llaveSimetricaKey, datosCliente.get(idPaquete), PADDING)));
         } else {
-            System.out.println("paquete " + inputLine + " no existe");
-            sOutput.println("DESCONOCIDO");
+            System.out.println("paquete " + idPaquete + " no existe");
+            sOutput.println(byte2str(cifrar(llaveSimetricaKey, "ERROR", PADDING)));
             socketCliente.close();
             return;
         }
@@ -207,7 +212,7 @@ public class Servidor extends Thread {
             socketCliente.close();
             return;
         }
-        sOutput.println("HMAC");
+        sOutput.println(byte2str(cifrar(llaveSimetricaKey, ("CLIENTE:" + idCliente + "_PQT:" + idPaquete + "_ESTADO:" + datosCliente.get(idPaquete)), PADDING)));
 
         // FIN
         inputLine = descifrar(privateKey, str2byte(sInput.readLine()), "RSA");

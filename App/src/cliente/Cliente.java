@@ -89,10 +89,10 @@ public class Cliente extends Thread {
 
                 // INICIO / ACK
                 sOutput.println(byte2str(cifrar(llavePublica, "INICIO", "RSA")));
-                inputLine = sInput.readLine();
-                if (inputLine.equals("ACK")) {
-                    System.out.println("ACK recibido");
-                } else {
+
+                inputLine = descifrar(llavePublica, str2byte(sInput.readLine()), "RSA");
+
+                if (!inputLine.equals("ACK")) {
                     System.out.println("ACK no recibido");
                     socketCliente.close();
                     return;
@@ -101,11 +101,13 @@ public class Cliente extends Thread {
                 // reto / reto cifrado con privada
                 String numReto = getRandomNumber(24, new Random()).toString();
                 sOutput.println(byte2str(cifrar(llavePublica, numReto, "RSA")));
+                System.out.println("Reto enviado: " + numReto);
+
                 inputLine = sInput.readLine();
                 byte[] retoCifrado = str2byte(inputLine);
                 String retoDescifrado = descifrar(llavePublica, retoCifrado, "RSA");
-                System.out.println("Reto enviado: " + numReto);
                 System.out.println("Reto recibido: " + retoDescifrado);
+
                 if (!numReto.equals(retoDescifrado)) {
                     System.out.println("Reto no coincide");
                     sOutput.println(byte2str(cifrar(llavePublica, "ERROR", "RSA")));
@@ -121,11 +123,20 @@ public class Cliente extends Thread {
                 byte[] llaveSimetricaCifrada = cifrar(llavePublica, byte2str(llaveSimetrica), "RSA");
                 sOutput.println(byte2str(llaveSimetricaCifrada));
                 System.out.println("Llave simetrica enviada: " + byte2str(llaveSimetrica));
-                inputLine = sInput.readLine();
+
+                inputLine = descifrar(llavePublica, str2byte(sInput.readLine()), "RSA");
+
+                if (!inputLine.equals("ACK")) {
+                    System.out.println("ACK no recibido");
+                    socketCliente.close();
+                    return;
+                }
 
                 // idCliente / ACK|ERROR
                 sOutput.println(byte2str(cifrar(llavePublica, String.valueOf(id), "RSA")));
-                inputLine = sInput.readLine();
+
+                inputLine = descifrar(llavePublica, str2byte(sInput.readLine()), "RSA");
+
                 if (inputLine.equals("ACK")) {
                     System.out.println("recibido:" + inputLine);
                 } else {
@@ -137,7 +148,9 @@ public class Cliente extends Thread {
                 // idPaquete / respuesta de tabla cifrado con llave simetrica
                 System.out.println("peticion " + i + " enviada");
                 sOutput.println(byte2str(cifrar(secretKey, String.valueOf(i), PADDING)));
-                inputLine = sInput.readLine();
+
+                inputLine = descifrar(secretKey, str2byte(sInput.readLine()), PADDING);
+
                 if (inputLine.equals("DESCONOCIDO")) {
                     System.out.println("el paquete no esta");
                     socketCliente.close();
@@ -148,7 +161,9 @@ public class Cliente extends Thread {
 
                 // ACK / HMAC(LS, digest(idCliente, idPaquete, respuesta))
                 sOutput.println(byte2str(cifrar(llavePublica, "ACK", "RSA")));
-                inputLine = sInput.readLine();
+
+                inputLine = descifrar(secretKey, str2byte(sInput.readLine()), PADDING);
+
                 if (!inputLine.equals("ERROR")) {
                     System.out.print("info paq: ");
                     System.out.println(inputLine);
