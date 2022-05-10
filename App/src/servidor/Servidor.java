@@ -241,12 +241,11 @@ public class Servidor extends Thread {
     }
 
     public static byte[] str2byte(String ss) {
-        String[] byteValues = ss.substring(1, ss.length() - 1).split(",");
-        byte[] bytes = new byte[byteValues.length];
-
-        for (int i = 0, len = bytes.length; i < len; i++) {
-            bytes[i] = Byte.parseByte(byteValues[i].trim());
+        // Encapsulamiento con hexadecimales
+        byte[] ret = new byte[ss.length() / 2];
+        for (int i = 0; i < ret.length; i++) {
+            ret[i] = (byte) Integer.parseInt(ss.substring(i * 2, (i + 1) * 2), 16);
         }
-        return bytes;
+        return ret;
     }
 }
