@@ -16,6 +16,7 @@ public class ServidorIterativo extends Servidor {
 
     public static void main(String[] args) throws Exception {
         poblarDatos();
+        tipo = "Iterativo";
         KeyPair keyPair;
         try {
             keyPair = LoadKeyPair("keys", "RSA");

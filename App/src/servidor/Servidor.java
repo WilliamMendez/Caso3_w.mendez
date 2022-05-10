@@ -1,9 +1,11 @@
 package servidor;
 
 import java.io.BufferedReader;
+import java.io.BufferedWriter;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
+import java.io.FileWriter;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.PrintWriter;
@@ -28,6 +30,8 @@ import javax.crypto.spec.SecretKeySpec;
 public class Servidor extends Thread {
     private static HashMap<String, HashMap<String, String>> datos = new HashMap<String, HashMap<String, String>>();
     private static final String PADDING = "AES/ECB/PKCS5Padding";
+    protected static String tipo;
+    protected static String nDelegados = "";
     private PrintWriter sOutput;
     private BufferedReader sInput;
     private Socket socketCliente;
@@ -161,7 +165,7 @@ public class Servidor extends Thread {
         long tiempoInicio = System.nanoTime();
         String retoCifrado = byte2str(cifrar(privateKey, retoStr, "RSA"));
         long tiempoFin = System.nanoTime();
-        System.out.println("Tiempo de cifrado asimetrico: " + (tiempoFin - tiempoInicio));
+
         sOutput.println(retoCifrado);
 
         // llave simetrica / ACK
@@ -172,13 +176,18 @@ public class Servidor extends Thread {
         System.out.println("llave simetrica recibida: " + byte2str(llaveSimetrica));
         SecretKey llaveSimetricaKey = new SecretKeySpec(llaveSimetrica, "AES");
 
+        sOutput.println(byte2str(cifrar(privateKey, "ACK", "RSA")));
+
         // probar cifrado simetrico
         long tiempoInicio2 = System.nanoTime();
         String mensajeCifrado = byte2str(cifrar(llaveSimetricaKey, retoStr, PADDING));
         long tiempoFin2 = System.nanoTime();
-        System.out.println("Tiempo de cifrado simetrico: " + (tiempoFin2 - tiempoInicio2));
 
-        sOutput.println(byte2str(cifrar(privateKey, "ACK", "RSA")));
+        System.out.println("Tiempo de cifrado asimetrico: " + (tiempoFin - tiempoInicio) + " nanosegundos\n"
+                         + "Tiempo de cifrado simetrico: " + (tiempoFin2 - tiempoInicio2) + " nanosegundos");
+        long[] tiempos = {tiempoFin - tiempoInicio, tiempoFin2 - tiempoInicio2};
+        guardar(tiempos);
+
 
         // idCliente / ACK|ERROR
         String idCliente = descifrar(privateKey, str2byte(sInput.readLine()), "RSA");
@@ -218,7 +227,7 @@ public class Servidor extends Thread {
             return;
         }
         sOutput.println(byte2str(cifrar(llaveSimetricaKey,
-                ("CLIENTE:" + idCliente + "_PQT:" + idPaquete + "_ESTADO:" + datosCliente.get(idPaquete)), PADDING)));
+                ("CLIENTE:" + idCliente + "_PKT:" + idPaquete + "_ESTADO:" + datosCliente.get(idPaquete)), PADDING)));
 
         // FIN
         inputLine = descifrar(privateKey, str2byte(sInput.readLine()), "RSA");
@@ -230,6 +239,18 @@ public class Servidor extends Thread {
         socketCliente.close();
         return;
 
+    }
+
+    private static void guardar(long[] tiempos) {
+        try {
+            FileWriter fichero = new FileWriter("docs/tiempos" + tipo + nDelegados + ".csv", true);
+            BufferedWriter bw = new BufferedWriter(fichero);
+            PrintWriter pw = new PrintWriter(bw);
+            pw.println(tiempos[0] + ";" + tiempos[1]);
+            pw.close();
+        } catch (IOException e) {
+            System.out.println("Error al escribir en el archivo");
+        }
     }
 
     @Override

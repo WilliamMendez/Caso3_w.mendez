@@ -16,6 +16,7 @@ public class ServidorDelegado extends Servidor {
 
     public static void main(String[] args) throws Exception {
         poblarDatos();
+        tipo = "Delegado";
         KeyPair keyPair;
         try {
             keyPair = LoadKeyPair("keys", "RSA");
@@ -28,6 +29,7 @@ public class ServidorDelegado extends Servidor {
         Scanner sc = new Scanner(System.in);
         System.out.println("Ingrese la cantidad de delegados: ");
         int cantDelegados = sc.nextInt();
+        nDelegados = String.valueOf(cantDelegados);
         ExecutorService pool = Executors.newFixedThreadPool(cantDelegados);
         ServerSocket socket = null;
         try {
