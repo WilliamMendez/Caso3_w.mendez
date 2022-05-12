@@ -13,7 +13,7 @@ public class ClienteDelegado extends Cliente {
     }
 
     public static void main(String[] args) throws Exception {
-        String[] nombres = {"Juliana", "Camila", "Daniel", "Boris", "Juan", "Sergio", "Cristian", "Pedro", "Jesus", "William", "Kevin"};
+        String[] nombres = {"Juliana", "Camila", "Daniel", "Boris", "Sergio", "Pedro", "Jesus", "Kevin", "William", "Juan", "Cristian"};
         Scanner sc = new Scanner(System.in);
         System.out.println("Ingrese la cantidad de delegados: ");
         int nDelegados = sc.nextInt();
@@ -21,7 +21,7 @@ public class ClienteDelegado extends Cliente {
             PublicKey llave = getPublicKey("keys", "RSA");
 
             // AppCliente clientes[] = new AppCliente[1];
-            ClienteDelegado[] clientes = new ClienteDelegado[32];
+            ClienteDelegado[] clientes = new ClienteDelegado[nDelegados];
             for (int i = 0; i < nDelegados; i++) {
                 String nombreAleatorio = nombres[new Random().nextInt(nombres.length)];
                 clientes[i] = new ClienteDelegado(nombreAleatorio, 1, llave, i);
@@ -30,6 +30,7 @@ public class ClienteDelegado extends Cliente {
         } catch (NoSuchAlgorithmException | InvalidKeySpecException | IOException e) {
             e.printStackTrace();
         }
+        sc.close();
 
     }
 }
