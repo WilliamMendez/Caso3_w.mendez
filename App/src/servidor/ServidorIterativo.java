@@ -17,6 +17,7 @@ public class ServidorIterativo extends Servidor {
     public static void main(String[] args) throws Exception {
         poblarDatos();
         tipo = "Iterativo";
+        idConsulta = 0;
         KeyPair keyPair;
         try {
             keyPair = LoadKeyPair("keys", "RSA");
@@ -36,6 +37,7 @@ public class ServidorIterativo extends Servidor {
                     PrintWriter sOutput = new PrintWriter(socketCliente.getOutputStream(), true);
                     BufferedReader sInput = new BufferedReader(new InputStreamReader(socketCliente.getInputStream()));
                     procesar(sInput, sOutput, socketCliente);
+                    idConsulta++;
                 } catch (IOException e) {
                     e.printStackTrace();
                 }

@@ -8,8 +8,10 @@ import java.io.InputStreamReader;
 import java.io.PrintWriter;
 import java.math.BigInteger;
 import java.net.Socket;
+import java.security.InvalidKeyException;
 import java.security.Key;
 import java.security.KeyFactory;
+import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.security.PublicKey;
 import java.security.spec.InvalidKeySpecException;
@@ -18,19 +20,22 @@ import java.util.Random;
 
 import javax.crypto.Cipher;
 import javax.crypto.KeyGenerator;
+import javax.crypto.Mac;
 import javax.crypto.SecretKey;
 
 public class Cliente extends Thread {
 
-    private int id;
+    private String nombre;
     private int nPeticiones;
     private PublicKey llavePublica;
+    private int idThread;
     private static final String PADDING = "AES/ECB/PKCS5Padding";
 
-    public Cliente(int id, int nPeticiones, PublicKey llavePublica) {
-        this.id = id;
+    public Cliente(String nombre, int nPeticiones, PublicKey llavePublica, int idThread) {
+        this.nombre = nombre;
         this.nPeticiones = nPeticiones;
         this.llavePublica = llavePublica;
+        this.idThread = idThread;
     }
 
     public static PublicKey getPublicKey(String path, String algorithm)
@@ -76,109 +81,152 @@ public class Cliente extends Thread {
         }
     }
 
+    public static byte[] getDigest(String mensaje) {
+        byte[] digest = null;
+        try {
+            MessageDigest md = MessageDigest.getInstance("SHA-256");
+            md.update(mensaje.getBytes());
+            digest = md.digest();
+        } catch (NoSuchAlgorithmException e) {
+            e.printStackTrace();
+        }
+        return digest;
+    }
+
+    public static String hmacWithJava(String algorithm, byte[] data, SecretKey key)
+            throws NoSuchAlgorithmException, InvalidKeyException {
+        Mac mac = Mac.getInstance(algorithm);
+        mac.init(key);
+        return byte2str(mac.doFinal(data));
+    }
+
     public void run() {
         try {
-            for (int i = 1; i <= nPeticiones; i++) {
-                System.out.println("-----------------------------------------------------");
-                Socket socketCliente = new Socket("localhost", 9090);
-                PrintWriter sOutput = new PrintWriter(socketCliente.getOutputStream(), true);
-                BufferedReader sInput = new BufferedReader(new InputStreamReader(socketCliente.getInputStream()));
-                String inputLine;
+            for (int i = 0; i < nPeticiones; i++) {
+                try {
+                    Socket socketCliente = new Socket("localhost", 9090);
+                    PrintWriter sOutput = new PrintWriter(socketCliente.getOutputStream(), true);
+                    BufferedReader sInput = new BufferedReader(new InputStreamReader(socketCliente.getInputStream()));
+                    String inputLine;
 
-                System.out.println("Cliente " + id);
+                    String idPaquete = String.valueOf(idThread * 10 + i);
 
-                // INICIO / ACK
-                sOutput.println(byte2str(cifrar(llavePublica, "INICIO", "RSA")));
+                    String mensaje = "";
+                    mensaje += idThread + "_" + nombre + "_" + idPaquete;
+                    System.out.println(mensaje + " Inicio");
 
-                inputLine = descifrar(llavePublica, str2byte(sInput.readLine()), "RSA");
+                    // INICIO / ACK
+                    sOutput.println(byte2str(cifrar(llavePublica, "INICIO", "RSA")));
 
-                if (!inputLine.equals("ACK")) {
-                    System.out.println("ACK no recibido");
+                    inputLine = descifrar(llavePublica, str2byte(sInput.readLine()), "RSA");
+
+                    if (!inputLine.equals("ACK")) {
+                        socketCliente.close();
+                        throw new Exception(mensaje + " ERROR: ACK no recibido");
+                    }
+
+                    // reto / reto cifrado con privada
+                    String numReto = getRandomNumber(24, new Random()).toString();
+                    sOutput.println(byte2str(cifrar(llavePublica, numReto, "RSA")));
+                    System.out.println(mensaje + " Reto enviado: " + numReto);
+
+                    inputLine = sInput.readLine();
+                    byte[] retoCifrado = str2byte(inputLine);
+                    String retoDescifrado = descifrar(llavePublica, retoCifrado, "RSA");
+                    System.out.println(mensaje + " Reto recibido: " + retoDescifrado);
+
+                    if (!numReto.equals(retoDescifrado)) {
+                        sOutput.println(byte2str(cifrar(llavePublica, "ERROR", "RSA")));
+                        socketCliente.close();
+                        throw new Exception(mensaje + " ERROR: Reto no coincide");
+                    }
+
+                    // llave simetrica / ACK
+
+                    KeyGenerator keyGenerator = KeyGenerator.getInstance("AES");
+                    SecretKey secretKey = keyGenerator.generateKey();
+                    byte[] llaveSimetrica = secretKey.getEncoded();
+                    byte[] llaveSimetricaCifrada = cifrar(llavePublica, byte2str(llaveSimetrica), "RSA");
+                    sOutput.println(byte2str(llaveSimetricaCifrada));
+                    System.out.println(mensaje + " Llave simetrica enviada: " + byte2str(llaveSimetrica));
+
+                    inputLine = descifrar(llavePublica, str2byte(sInput.readLine()), "RSA");
+
+                    if (!inputLine.equals("ACK")) {
+                        socketCliente.close();
+                        throw new Exception(mensaje + " ERROR: ACK no recibido");
+                    }
+
+                    // idCliente / ACK|ERROR
+                    sOutput.println(byte2str(cifrar(llavePublica, nombre, "RSA")));
+
+                    inputLine = descifrar(llavePublica, str2byte(sInput.readLine()), "RSA");
+
+                    if (inputLine.equals("ACK")) {
+                        System.out.println(mensaje + " Se encontró el cliente: " + nombre);
+                    } else {
+                        socketCliente.close();
+                        throw new Exception(mensaje + " ERROR: cliente no existe");
+                    }
+
+                    // idPaquete / respuesta de tabla cifrado con llave simetrica
+                    sOutput.println(byte2str(cifrar(secretKey, idPaquete, PADDING)));
+
+                    String estao = descifrar(secretKey, str2byte(sInput.readLine()), PADDING);
+
+                    if (estao.equals("DESCONOCIDO")) {
+                        socketCliente.close();
+                        throw new Exception(mensaje + " ERROR: El paquete no esta");
+                    } else {
+                        System.out.println(mensaje + " Estado del paquete: " + estao);
+                    }
+
+                    // ACK / HMAC(LS, digest(idCliente, idPaquete, respuesta))
+                    sOutput.println(byte2str(cifrar(llavePublica, "ACK", "RSA")));
+
+                    inputLine = descifrar(secretKey, str2byte(sInput.readLine()), PADDING);
+
+                    if (!inputLine.equals("ERROR")) {
+                        System.out.print(mensaje + " HMAC recibido: ");
+                        System.out.println(inputLine);
+
+                        String digest = "CLIENTE:" + nombre + "_PKT:" + idPaquete + "_ESTADO:" + estao;
+                        byte[] digestBytes = getDigest(digest);
+                        try {
+                            String hmac = hmacWithJava("HmacSHA256", digestBytes, secretKey);
+                            System.out.println(mensaje + " HMAC generado: " + hmac);
+                            if (hmac.equals(inputLine)) {
+                                System.out.println(mensaje + " HMAC correcto");
+                            } else {
+                                socketCliente.close();
+                                sOutput.println(byte2str(cifrar(llavePublica, "ERROR", "RSA")));
+                                throw new Exception(mensaje + " ERROR: HMAC incorrecto");
+                            }
+                        } catch (InvalidKeyException | NoSuchAlgorithmException e) {
+                            socketCliente.close();
+                            throw new Exception(mensaje + " ERROR: no se pudo generar el HMAC");
+                        }
+
+                    } else {
+                        socketCliente.close();
+                        throw new Exception(mensaje + " ERROR: No se recibio el HMAC");
+                    }
+
+                    // FIN
+                    sOutput.println(byte2str(cifrar(llavePublica, "TERMINAR", "RSA")));
+                    System.out.println(mensaje + " Fin");
                     socketCliente.close();
-                    return;
+
+                } catch (Exception e) {
+                    System.err.println(e.getMessage());
+                    ;
                 }
-
-                // reto / reto cifrado con privada
-                String numReto = getRandomNumber(24, new Random()).toString();
-                sOutput.println(byte2str(cifrar(llavePublica, numReto, "RSA")));
-                System.out.println("Reto enviado: " + numReto);
-
-                inputLine = sInput.readLine();
-                byte[] retoCifrado = str2byte(inputLine);
-                String retoDescifrado = descifrar(llavePublica, retoCifrado, "RSA");
-                System.out.println("Reto recibido: " + retoDescifrado);
-
-                if (!numReto.equals(retoDescifrado)) {
-                    System.out.println("Reto no coincide");
-                    sOutput.println(byte2str(cifrar(llavePublica, "ERROR", "RSA")));
-                    socketCliente.close();
-                    return;
-                }
-
-                // llave simetrica / ACK
-
-                KeyGenerator keyGenerator = KeyGenerator.getInstance("AES");
-                SecretKey secretKey = keyGenerator.generateKey();
-                byte[] llaveSimetrica = secretKey.getEncoded();
-                byte[] llaveSimetricaCifrada = cifrar(llavePublica, byte2str(llaveSimetrica), "RSA");
-                sOutput.println(byte2str(llaveSimetricaCifrada));
-                System.out.println("Llave simetrica enviada: " + byte2str(llaveSimetrica));
-
-                inputLine = descifrar(llavePublica, str2byte(sInput.readLine()), "RSA");
-
-                if (!inputLine.equals("ACK")) {
-                    System.out.println("ACK no recibido");
-                    socketCliente.close();
-                    return;
-                }
-
-                // idCliente / ACK|ERROR
-                sOutput.println(byte2str(cifrar(llavePublica, String.valueOf(id), "RSA")));
-
-                inputLine = descifrar(llavePublica, str2byte(sInput.readLine()), "RSA");
-
-                if (inputLine.equals("ACK")) {
-                    System.out.println("Se encontró el cliente: " + id);
-                } else {
-                    System.out.println("ERROR: cliente " + id + " no existe");
-                    socketCliente.close();
-                    return;
-                }
-
-                // idPaquete / respuesta de tabla cifrado con llave simetrica
-                sOutput.println(byte2str(cifrar(secretKey, String.valueOf(i), PADDING)));
-
-                inputLine = descifrar(secretKey, str2byte(sInput.readLine()), PADDING);
-
-                if (inputLine.equals("DESCONOCIDO")) {
-                    System.out.println("el paquete " + i + " no esta");
-                    socketCliente.close();
-                    return;
-                } else {
-                    System.out.println("recibido: " + inputLine);
-                }
-
-                // ACK / HMAC(LS, digest(idCliente, idPaquete, respuesta))
-                sOutput.println(byte2str(cifrar(llavePublica, "ACK", "RSA")));
-
-                inputLine = descifrar(secretKey, str2byte(sInput.readLine()), PADDING);
-
-                if (!inputLine.equals("ERROR")) {
-                    System.out.print("info paq: ");
-                    System.out.println(inputLine);
-                } else {
-                    System.out.println("ERROR: algo salio mal con el HMAC");
-                    socketCliente.close();
-                    return;
-                }
-
-                // FIN
-                sOutput.println(byte2str(cifrar(llavePublica, "TERMINAR", "RSA")));
-                socketCliente.close();
             }
+
         } catch (Exception e) {
             e.printStackTrace();
         }
+        return;
 
     }
 
@@ -190,7 +238,7 @@ public class Cliente extends Thread {
         return new BigInteger(new String(ch));
     }
 
-    public String byte2str(byte[] b) {
+    public static String byte2str(byte[] b) {
         // Encapsulamiento con hexadecimales
         String ret = "";
         for (int i = 0; i < b.length; i++) {

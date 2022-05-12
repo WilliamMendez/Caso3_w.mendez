@@ -19,6 +19,7 @@ public class ServidorDelegado extends Servidor {
         tipo = "Delegado";
         KeyPair keyPair;
         try {
+            // keyPair = generateKey();
             keyPair = LoadKeyPair("keys", "RSA");
             Servidor.publicKey = keyPair.getPublic();
             Servidor.privateKey = keyPair.getPrivate();

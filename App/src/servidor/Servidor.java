@@ -10,10 +10,12 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.PrintWriter;
 import java.net.Socket;
+import java.security.InvalidKeyException;
 import java.security.Key;
 import java.security.KeyFactory;
 import java.security.KeyPair;
 import java.security.KeyPairGenerator;
+import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.security.PrivateKey;
 import java.security.PublicKey;
@@ -24,19 +26,21 @@ import java.util.HashMap;
 import java.util.Random;
 
 import javax.crypto.Cipher;
+import javax.crypto.Mac;
 import javax.crypto.SecretKey;
 import javax.crypto.spec.SecretKeySpec;
 
 public class Servidor extends Thread {
-    private static HashMap<String, HashMap<String, String>> datos = new HashMap<String, HashMap<String, String>>();
     private static final String PADDING = "AES/ECB/PKCS5Padding";
+    private static HashMap<String, HashMap<String, String>> datos = new HashMap<String, HashMap<String, String>>();
     protected static String tipo;
     protected static String nDelegados = "";
+    protected static PublicKey publicKey;
+    protected static PrivateKey privateKey;
+    protected static int idConsulta;
     private PrintWriter sOutput;
     private BufferedReader sInput;
     private Socket socketCliente;
-    protected static PublicKey publicKey;
-    protected static PrivateKey privateKey;
 
     public Servidor(Socket socketCliente) throws IOException {
         this.socketCliente = socketCliente;
@@ -45,15 +49,18 @@ public class Servidor extends Thread {
     public static void poblarDatos() {
         String[] estados = { "PKT_EN_OFICINA", "PKT_RECOGIDO", "PKT_EN_CLASIFICACION", "PKT_DESPACHADO",
                 "PKT_EN_ENTREGA", "PKT_ENTREGADO", "PKT_DESCONOCIDO" };
+        String[] nombres = { "Juliana", "Camila", "Daniel", "Boris", "Sergio", "Pedro", "Jesus", "Kevin", "William" };
 
+        int idPKT = 0;
         // Generamos los datos
-        for (int i = 0; i < 32; i++) {
+        for (int i = 0; i < nombres.length; i++) {
             HashMap<String, String> datosCliente = new HashMap<String, String>();
-            for (int j = 0; j < 32; j++) {
+            for (int j = 0; j < 10; j++) {
                 int estado = new Random().nextInt(estados.length);
-                datosCliente.put(Integer.toString(j), estados[estado]);
+                datosCliente.put(String.valueOf(idPKT), estados[estado]);
+                idPKT++;
             }
-            datos.put(Integer.toString(i), datosCliente);
+            datos.put(nombres[i], datosCliente);
         }
     }
 
@@ -141,26 +148,46 @@ public class Servidor extends Thread {
         return new KeyPair(publicKey, privateKey);
     }
 
-    public static void procesar(BufferedReader sInput, PrintWriter sOutput, Socket socketCliente) throws IOException {
+    public static byte[] getDigest(String mensaje) {
+        byte[] digest = null;
+        try {
+            MessageDigest md = MessageDigest.getInstance("SHA-256");
+            md.update(mensaje.getBytes());
+            digest = md.digest();
+        } catch (NoSuchAlgorithmException e) {
+            e.printStackTrace();
+        }
+        return digest;
+    }
+
+    public static String hmacWithJava(String algorithm, byte[] data, SecretKey key)
+            throws NoSuchAlgorithmException, InvalidKeyException {
+        Mac mac = Mac.getInstance(algorithm);
+        mac.init(key);
+        return byte2str(mac.doFinal(data));
+    }
+
+    public static void procesar(BufferedReader sInput, PrintWriter sOutput, Socket socketCliente)
+            throws IOException {
         sOutput = new PrintWriter(socketCliente.getOutputStream(), true);
         sInput = new BufferedReader(new InputStreamReader(socketCliente.getInputStream()));
         String inputLine;
 
-        System.out.println("-----------------------------------------------------");
+        String mensaje = "";
+        mensaje += idConsulta;
 
         // INICIO / ACK
         inputLine = descifrar(privateKey, str2byte(sInput.readLine()), "RSA");
         if (inputLine.equals("INICIO")) {
-            System.out.println("INICIO");
+            System.out.println(mensaje + " Inicio");
             sOutput.println(byte2str(cifrar(privateKey, "ACK", "RSA")));
         } else {
             sOutput.println(byte2str(cifrar(privateKey, "ERROR", "RSA")));
-            socketCliente.close();
             return;
         }
         // reto / reto cifrado con privada
         String retoStr = descifrar(privateKey, str2byte(sInput.readLine()), "RSA");
-        System.out.println("reto recibido: " + retoStr);
+        System.out.println(mensaje + " reto recibido: " + retoStr);
 
         long tiempoInicio = System.nanoTime();
         String retoCifrado = byte2str(cifrar(privateKey, retoStr, "RSA"));
@@ -173,7 +200,7 @@ public class Servidor extends Thread {
         inputLine = descifrar(privateKey, simetrica, "RSA");
 
         byte[] llaveSimetrica = str2byte(inputLine);
-        System.out.println("llave simetrica recibida: " + byte2str(llaveSimetrica));
+        System.out.println(mensaje + " llave simetrica recibida: " + byte2str(llaveSimetrica));
         SecretKey llaveSimetricaKey = new SecretKeySpec(llaveSimetrica, "AES");
 
         sOutput.println(byte2str(cifrar(privateKey, "ACK", "RSA")));
@@ -183,70 +210,85 @@ public class Servidor extends Thread {
         String mensajeCifrado = byte2str(cifrar(llaveSimetricaKey, retoStr, PADDING));
         long tiempoFin2 = System.nanoTime();
 
-        System.out.println("Tiempo de cifrado asimetrico: " + (tiempoFin - tiempoInicio) + " nanosegundos\n"
-                         + "Tiempo de cifrado simetrico: " + (tiempoFin2 - tiempoInicio2) + " nanosegundos");
-        long[] tiempos = {tiempoFin - tiempoInicio, tiempoFin2 - tiempoInicio2};
+        System.out.println(mensaje +
+                " Tiempo de cifrado asimetrico: " + ((float) (tiempoFin - tiempoInicio) / 1000000) + " milisegundos\n" +
+                "   Tiempo de cifrado simetrico: " + ((float) (tiempoFin2 - tiempoInicio2) / 1000000)
+                + " milisegundos");
+        float[] tiempos = { ((float) (tiempoFin - tiempoInicio) / 1000000),
+                ((float) (tiempoFin2 - tiempoInicio2) / 1000000) };
         guardar(tiempos);
-
 
         // idCliente / ACK|ERROR
         String idCliente = descifrar(privateKey, str2byte(sInput.readLine()), "RSA");
 
         HashMap<String, String> datosCliente;
         if (datos.containsKey(idCliente)) {
-            System.out.println("cliente " + idCliente + " existe");
+            System.out.println(mensaje + " cliente " + idCliente + " existe");
             sOutput.println(byte2str(cifrar(privateKey, "ACK", "RSA")));
             datosCliente = datos.get(idCliente);
         } else {
-            System.out.println("cliente " + idCliente + " no existe");
+            System.out.println(mensaje + " ERROR: cliente " + idCliente + " no existe");
             sOutput.println(byte2str(cifrar(privateKey, "ERROR", "RSA")));
-            socketCliente.close();
             return;
         }
+
+        mensaje += "_" + idCliente;
 
         // idPaquete / respuesta de tabla cifrado con llave simetrica
 
         String idPaquete = descifrar(llaveSimetricaKey, str2byte(sInput.readLine()), PADDING);
 
         if (datosCliente.containsKey(idPaquete)) {
-            System.out.println("paquete " + idPaquete + " existe" + " con estado: " + datosCliente.get(idPaquete));
+            System.out.println(
+                    mensaje + " paquete " + idPaquete + " existe" + " con estado: " + datosCliente.get(idPaquete));
             sOutput.println(byte2str(cifrar(llaveSimetricaKey, datosCliente.get(idPaquete), PADDING)));
         } else {
-            System.out.println("paquete " + idPaquete + " no existe");
+            System.out.println(mensaje + " ERROR: paquete " + idPaquete + " no existe");
             sOutput.println(byte2str(cifrar(llaveSimetricaKey, "DESCONOCIDO", PADDING)));
-            socketCliente.close();
             return;
         }
+
+        mensaje += "_" + idPaquete;
 
         // ACK / HMAC(LS, digest(idCliente, idPaquete, respuesta))
 
         inputLine = descifrar(privateKey, str2byte(sInput.readLine()), "RSA");
         if (!inputLine.equals("ACK")) {
-            System.out.println("ERROR: el cliente encontró error en la respuesta del paquete");
-            socketCliente.close();
+            System.out.println(mensaje + " ERROR: el cliente encontró error en la respuesta del paquete");
             return;
         }
-        sOutput.println(byte2str(cifrar(llaveSimetricaKey,
-                ("CLIENTE:" + idCliente + "_PKT:" + idPaquete + "_ESTADO:" + datosCliente.get(idPaquete)), PADDING)));
+        String digest = "CLIENTE:" + idCliente + "_PKT:" + idPaquete + "_ESTADO:" + datosCliente.get(idPaquete);
+        System.out.println(mensaje + " digest: " + digest);
+        byte[] digestBytes = getDigest(digest);
+        try {
+            String hmac = hmacWithJava("HmacSHA256", digestBytes, llaveSimetricaKey);
+            System.out.println(mensaje + " HMAC: " + hmac);
+            sOutput.println(byte2str(cifrar(llaveSimetricaKey, hmac, PADDING)));
+        } catch (InvalidKeyException | NoSuchAlgorithmException e) {
+            System.out.println(mensaje + " ERROR: no se pudo generar el HMAC");
+            e.printStackTrace();
+            return;
+        }
 
         // FIN
         inputLine = descifrar(privateKey, str2byte(sInput.readLine()), "RSA");
         if (inputLine.equals("TERMINAR")) {
-            System.out.println("FIN");
+            System.out.println(mensaje + " Fin");
         } else {
-            System.out.println("ERROR: El cliente envio algo inesperado");
+            System.out.println(mensaje + " ERROR: El cliente encontro errores en el HMAC");
         }
         socketCliente.close();
         return;
 
     }
 
-    private static void guardar(long[] tiempos) {
+    private static void guardar(float[] tiempos) {
         try {
             FileWriter fichero = new FileWriter("docs/tiempos" + tipo + nDelegados + ".csv", true);
             BufferedWriter bw = new BufferedWriter(fichero);
             PrintWriter pw = new PrintWriter(bw);
-            pw.println(tiempos[0] + ";" + tiempos[1]);
+            String linea = tiempos[0] + ";" + tiempos[1];
+            pw.println(linea.replace(".", ","));
             pw.close();
         } catch (IOException e) {
             System.out.println("Error al escribir en el archivo");
@@ -257,6 +299,7 @@ public class Servidor extends Thread {
     public void run() {
         try {
             procesar(sInput, sOutput, socketCliente);
+            idConsulta++;
         } catch (IOException e) {
             e.printStackTrace();
         }
